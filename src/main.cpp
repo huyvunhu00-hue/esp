@@ -1,52 +1,100 @@
-#include <Arduino.h>    
-#include "DHT.h"        
+#include <Arduino.h>
+#include <Wire.h>
+#include <DHT.h>
+#include <BH1750.h>
+#include <TFT_eSPI.h>
 
-#define DHTPIN 4     
-
-// Loại cảm biến sử dụng: DHT22 (AM2302)
-#define DHTTYPE DHT22   
-
-// Khởi tạo đối tượng DHT với chân và loại cảm biến đã khai báo
+// ========================================================
+// PHẦN 1: CẤU HÌNH VÀ XỬ LÝ DHT22 (ONE WIRE)
+// ========================================================
+#define DHTPIN 4
+#define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
 
-// ------------------ HÀM SETUP CẢM BIẾN SỬ DỤNG GIAO THỨC ONE WIRE ------------------
-void setup() {
-  // Khởi động Serial để in dữ liệu ra Serial Monitor
-  // Baudrate 115200 thường dùng cho ESP32 / ESP8266
-  Serial.begin(115200);
+float tempValue = 0;
+float humiValue = 0;
 
-  // In thông báo khởi tạo cảm biến
-  Serial.println(F("Đang khởi tạo cảm biến DHT22..."));
-  
-  // Khởi động cảm biến DHT
-  dht.begin();
+void readDHT() {
+    tempValue = dht.readTemperature();
+    humiValue = dht.readHumidity();
+    if (isnan(tempValue) || isnan(humiValue)) {
+        Serial.println("Lỗi: Không đọc được dữ liệu từ DHT22!");
+    }
 }
 
-// ------------------ HÀM LOOP ------------------
+// ========================================================
+// PHẦN 2: CẤU HÌNH VÀ XỬ LÝ BH1750 (I2C)
+// ========================================================
+BH1750 lightMeter;
+float luxValue = 0;
+
+void readLight() {
+    luxValue = lightMeter.readLightLevel();
+    if (luxValue < 0) {
+        Serial.println("Lỗi: Không đọc được dữ liệu từ BH1750!");
+    }
+}
+
+// ========================================================
+// PHẦN 3: CẤU HÌNH VÀ HIỂN THỊ TFT LCD (SPI)
+// ========================================================
+TFT_eSPI tft = TFT_eSPI();
+
+void initLCD() {
+    tft.init();
+    tft.setRotation(1);
+    tft.fillScreen(TFT_BLACK);
+    
+    // Vẽ tiêu đề cố định
+    tft.setTextColor(TFT_MAGENTA, TFT_BLACK);
+    tft.setTextSize(2);
+    tft.drawString("DASHBOARD GIAM SAT", 40, 10);
+    tft.drawFastHLine(0, 35, 320, TFT_GREY);
+}
+
+void updateLCD() {
+    // Khu vực hiển thị Nhiệt độ
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    tft.setCursor(10, 60);
+    tft.printf("Nhiet do: %.1f C", tempValue);
+
+    // Khu vực hiển thị Độ ẩm
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.setCursor(10, 100);
+    tft.printf("Do am   : %.1f %%", humiValue);
+
+    // Khu vực hiển thị Ánh sáng
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.setCursor(10, 140);
+    tft.printf("Anh sang: %.1f lx", luxValue);
+}
+
+// ========================================================
+// KHỞI TẠO VÀ VÒNG LẶP CHÍNH
+// ========================================================
+
+void setup() {
+    Serial.begin(115200);
+    
+    // Khởi tạo các phần cứng
+    dht.begin();                      // Khởi tạo DHT
+    Wire.begin(21, 22);               // Khởi tạo I2C (SDA=21, SCL=22)
+    lightMeter.begin();               // Khởi tạo BH1750
+    initLCD();                        // Khởi tạo Màn hình
+    
+    Serial.println("He thong da san sang!");
+}
+
 void loop() {
-  // DHT22 cần tối thiểu ~2 giây giữa các lần đọc
-  delay(2000);
+    // 1. Thu thập dữ liệu
+    readDHT();
+    readLight();
 
-  // Đọc độ ẩm (%)
-  float h = dht.readHumidity();
+    // 2. Xuất dữ liệu ra Serial (để debug)
+    Serial.printf("T: %.1f C | H: %.1f %% | L: %.1f lx\n", tempValue, humiValue, luxValue);
 
-  // Đọc nhiệt độ (đơn vị °C)
-  float t = dht.readTemperature();
+    // 3. Hiển thị lên LCD
+    updateLCD();
 
-  // Kiểm tra nếu dữ liệu không hợp lệ (NaN = Not a Number)
-  // Thường xảy ra khi cảm biến lỗi hoặc dây nối không đúng
-  if (isnan(h) || isnan(t)) {
-    Serial.println(F("Lỗi: Không thể đọc dữ liệu từ cảm biến DHT!"));
-    return;  // Thoát vòng lặp hiện tại
-  }
-
-  // In độ ẩm ra Serial Monitor
-  Serial.print(F("Độ ẩm: "));
-  Serial.print(h);
-  Serial.print(F("%  |  "));
-
-  // In nhiệt độ ra Serial Monitor
-  Serial.print(F("Nhiệt độ: "));
-  Serial.print(t);
-  Serial.println(F("°C"));
+    delay(2000); // Cập nhật sau mỗi 2 giây
 }
